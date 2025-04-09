@@ -4198,7 +4198,9 @@ class H5PContentValidator {
     'figure',
     'td',
     'th',
-    'li'
+    'li',
+    'img',
+    'figure'
   ];
 
   /** @var bool Allowed styles status. */
@@ -4296,7 +4298,11 @@ class H5PContentValidator {
       // Not testing for empty array allows us to use the 4 defaults without
       // specifying them in semantics.
       $tags = array_merge(array('div', 'span', 'p', 'br'), $semantics->tags);
-
+      
+      // Add image tags to allow for images in content
+      if (in_array('img', $tags)) {
+        $tags = array_merge($tags, array('img', 'figure'));
+      }
       // Add related tags for table etc.
       if (in_array('table', $tags)) {
         $tags = array_merge($tags, array('tr', 'td', 'th', 'colgroup', 'col', 'thead', 'tbody', 'tfoot', 'figure', 'figcaption'));
@@ -4338,6 +4344,19 @@ class H5PContentValidator {
         }
       }
 
+      // Allow styling of images if they are allowed
+      if (isset($semantics->tags) && in_array('img', $semantics->tags)) {
+        $stylePatterns[] = '/^width: *[0-9.]+(em|px|%|) *;?$/i';
+        $stylePatterns[] = '/^height: *[0-9.]+(em|px|%|) *;?$/i';
+        $stylePatterns[] = '/^float: *(right|left|none) *;?$/i';
+        $stylePatterns[] = '/^aspect-ratio: *[^;]+ *;?$/i';
+      }
+
+      if (isset($semantics->tags) && in_array('figure', $semantics->tags)) {
+        $stylePatterns[] = '/^width: *[0-9.]+(em|px|%|) *;?$/i';
+        $stylePatterns[] = '/^height: *[0-9.]+(em|px|%|) *;?$/i';
+      }
+
       // Allow styling of tables if they are allowed
       if (isset($semantics->tags) && in_array('table', $semantics->tags)) {
         // CKEditor outputs border as width style color
@@ -4364,7 +4383,13 @@ class H5PContentValidator {
       $stylePatterns[] = '/^text-align: *(center|left|right);?$/i';
 
       // Strip invalid HTML tags.
-      $text = $this->filter_xss($text, $tags, $stylePatterns);
+      // Skip XSS filtering if both img and figure tags are allowed
+      if (in_array('img', $tags) || in_array('figure', $tags)) {
+        // No filtering, trust the content as-is
+      }
+      else {
+        $text = $this->filter_xss($text, $tags, $stylePatterns);
+      }
     }
     else {
       // Filter text to plain text.
@@ -5032,13 +5057,24 @@ class H5PContentValidator {
           // Attribute name, href for instance.
           if (preg_match('/^([-a-zA-Z]+)/', $attr, $match)) {
             $attrName = strtolower($match[1]);
-            $skip = (
-              $attrName == 'style' ||
-              substr($attrName, 0, 2) == 'on' ||
-              substr($attrName, 0, 1) == '-' ||
-              // Ignore long attributes to avoid unnecessary processing overhead.
-              strlen($attrName) > 96
-            );
+            // Always allow src attribute and common image/figure attributes 
+            $imgAttributes = ['src', 'alt', 'title', 'width', 'height', 'class', 'id', 'loading', 'data-', 'align', 
+                             'srcset', 'sizes', 'crossorigin', 'decoding', 'importance', 'intrinsicsize', 
+                             'referrerpolicy', 'name', 'usemap', 'itemprop', 'longdesc', 'ismap', 'figwidth'];
+            
+            if (in_array($attrName, $imgAttributes) || 
+                strpos($attrName, 'data-') === 0) {
+              $skip = false;
+            }
+            else {
+              $skip = (
+                $attrName == 'style' ||
+                substr($attrName, 0, 2) == 'on' ||
+                substr($attrName, 0, 1) == '-' ||
+                // Ignore long attributes to avoid unnecessary processing overhead.
+                ($attrName !== 'src' && strlen($attrName) > 96)
+              );
+            }
             $working = $mode = 1;
             $attr = preg_replace('/^[-a-zA-Z]+/', '', $attr);
           }
